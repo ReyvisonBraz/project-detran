@@ -18,7 +18,7 @@ async function testarScraper() {
     await scraper.preencherDados(placa, renavam);
     
     let tentativas = 0;
-    const maxTentativas = 20; // Aumentado conforme solicitado
+    const maxTentativas = 3; // Reduzido para economizar créditos, já que o 2Captcha é assertivo
     let sucesso = false;
 
     while (tentativas < maxTentativas && !sucesso) {

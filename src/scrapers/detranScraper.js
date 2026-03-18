@@ -1,140 +1,188 @@
 const { chromium } = require('playwright');
+const path = require('path');
 require('dotenv').config();
 
 /**
- * Classe responsável por navegar no portal do DETRAN-PA e realizar a Consulta Detalhada.
+ * URLs dos serviços do DETRAN-PA
+ */
+const DETRAN_URLS = {
+  CONSULTA_DETALHADA: 'https://sistemas-renavam.detran.pa.gov.br/sistransito/detran-web/servicos/veiculos/indexRenavam.jsf',
+  LICENCIAMENTO_ATUAL: 'https://sistemas-renavam.detran.pa.gov.br/sistransito/detran-web/servicos/b/indexBLicencAnoAtual.jsf',
+  LICENCIAMENTO_ANTERIOR: 'https://sistemas-renavam.detran.pa.gov.br/sistransito/detran-web/servicos/b/indexBLicencAnoAnterior.jsf',
+  SNG: 'https://sistemas-renavam.detran.pa.gov.br/sistransito/detran-web/servicos/veiculos/indexSNG.jsf',
+  CRLV: 'https://sistemas-renavam.detran.pa.gov.br/sistransito/detran-web/servicos/crlv/indexCRLVe.jsf'
+};
+
+/**
+ * Classe responsável por navegar no portal do DETRAN-PA.
  */
 class DetranPaScraper {
   constructor() {
-    this.url = 'https://sistemas-renavam.detran.pa.gov.br/sistransito/detran-web/servicos/veiculos/indexRenavam.jsf';
     this.browser = null;
     this.page = null;
+    this.currentService = 'CONSULTA_DETALHADA';
   }
 
   /**
-   * Inicializa o navegador Chromium.
+   * Inicializa o navegador e acessa a URL do serviço desejado.
+   * @param {string} servico Nome do serviço (chave de DETRAN_URLS)
    */
-  async init() {
-    console.log('[Scraper] Iniciando navegador...');
-    this.browser = await chromium.launch({ headless: false }); // Navegador visível para o teste
+  async init(servico = 'CONSULTA_DETALHADA') {
+    this.currentService = servico;
+    const url = DETRAN_URLS[servico] || DETRAN_URLS.CONSULTA_DETALHADA;
+    console.log(`[Scraper] Iniciando navegador para serviço: ${servico}...`);
+    
+    if (this.browser) await this.browser.close();
+
+    this.browser = await chromium.launch({ headless: false });
     this.page = await this.browser.newPage();
+    
+    console.log(`[Scraper] Navegando para ${url}...`);
+    try {
+        await this.page.goto(url, { waitUntil: 'load', timeout: 60000 });
+    } catch (e) {
+        console.warn(`[Scraper] Alerta: Tempo de carregamento excedido, prosseguindo mesmo assim...`);
+    }
   }
 
   /**
-   * Acessa a página de consulta e preenche os dados do veículo.
-   * @param {string} placa 
- * @param {string} renavam 
+   * Preenche os dados comuns (Placa e Renavam).
    */
-  async preencherDados(placa, renavam) {
-    console.log(`[Scraper] Acessando portal para Placa: ${placa}...`);
-    await this.page.goto(this.url);
-
-    // Seletores mapeados na análise técnica
-    const selectorPlaca = 'input[id="indexRenavam:placa1"]';
-    const selectorRenavam = 'input[id="indexRenavam:renavam"]';
-
-    // Adicionado delay de digitação para parecer mais humano (100ms entre teclas)
-    await this.page.fill(selectorPlaca, ''); // Limpa antes
-    await this.page.type(selectorPlaca, placa, { delay: 150 });
+  async preencherDados(placa, renavam, cpf = null) {
+    console.log(`[Scraper] Preenchendo dados básicos...`);
     
-    await this.page.fill(selectorRenavam, ''); // Limpa antes
-    await this.page.type(selectorRenavam, renavam, { delay: 150 });
+    // Seletores híbridos (ID parcial e Placeholder)
+    const placaInput = 'input[id$="placa"], input[placeholder*="Placa"]';
+    const renavamInput = 'input[id$="renavam"], input[placeholder*="Renavam"]';
     
-    console.log('[Scraper] Dados preenchidos com sucesso.');
+    await this.page.waitForSelector(placaInput, { state: 'attached', timeout: 30000 });
+    
+    await this.page.fill(placaInput, '');
+    await this.page.type(placaInput, placa, { delay: 100 });
+    
+    await this.page.fill(renavamInput, '');
+    await this.page.type(renavamInput, renavam, { delay: 100 });
+
+    if (cpf) {
+      console.log(`[Scraper] Preenchendo CPF...`);
+      const cpfInput = 'input[id$="cpf"], input[id$="dnCpf"], input[placeholder*="CPF"]';
+      await this.page.waitForSelector(cpfInput, { timeout: 15000 });
+      await this.page.fill(cpfInput, '');
+      await this.page.type(cpfInput, cpf, { delay: 100 });
+    }
   }
 
   /**
-   * Lógica para recarregar o captcha se necessário.
+   * Preenche dados específicos para consulta SNG (Chassi).
    */
-  async recarregarCaptcha() {
-    console.log('[Scraper] Recarregando imagem do captcha...');
-    // O botão de recarregar está dentro de um link com title 'Atualizar'
-    const reloadButton = 'a[title="Atualizar"]';
-    await this.page.click(reloadButton);
-    await this.page.waitForTimeout(1500); // Aumentado para garantir a troca da imagem
+  async preencherSNG(chassi) {
+    console.log(`[Scraper] Preenchendo Chassi para SNG...`);
+    const chassiInput = 'input[id$="chassi"]';
+    await this.page.waitForSelector(chassiInput, { timeout: 15000 });
+    await this.page.fill(chassiInput, '');
+    await this.page.type(chassiInput, chassi, { delay: 100 });
   }
 
   /**
    * Captura a imagem do captcha em memória (Buffer).
-   * @returns {Promise<Buffer>} Buffer da imagem capturada.
    */
   async capturarCaptcha() {
     console.log('[Scraper] Capturando imagem do captcha em memória...');
-    const captchaElement = await this.page.$('#indexRenavam img'); 
-    const buffer = await captchaElement.screenshot();
-    return buffer;
+    const captchaElement = await this.page.waitForSelector('img[id$="captcha"]', { timeout: 15000 });
+    return await captchaElement.screenshot();
+  }
+
+  /**
+   * Recarrega a imagem do captcha.
+   */
+  async recarregarCaptcha() {
+    console.log('[Scraper] Recarregando imagem do captcha...');
+    const reloadButton = 'a[title="Atualizar"]';
+    await this.page.click(reloadButton);
+    await this.page.waitForTimeout(2000); 
   }
 
   /**
    * Insere o texto do captcha e clica em Confirmar.
-   * @param {string} captchaText 
    */
-  async submeterFormulario(captchaText) {
-    console.log(`[Scraper] Inserindo captcha: ${captchaText}...`);
-    const selectorCaptchaInput = 'input[id="indexRenavam:senha"]';
-    const selectorConfirmar = 'input[id="indexRenavam:confirma"]';
-
-    await this.page.fill(selectorCaptchaInput, ''); // Limpa antes
-    await this.page.type(selectorCaptchaInput, captchaText, { delay: 150 });
+  async submeterCaptcha(texto) {
+    console.log(`[Scraper] Inserindo captcha: ${texto}...`);
+    const captchaInput = 'input[id$="captcha"], input[id$="senha"], input[id$="txtCaptcha"], input[placeholder*="sequência"]';
+    const confirmarBtn = 'button:has-text("CONFIRMAR"), button:has-text("Confirmar"), input[value="Confirmar"], input[id$="confirma"]';
     
-    await this.page.click(selectorConfirmar);
+    await this.page.waitForSelector(captchaInput, { timeout: 15000 });
+    await this.page.fill(captchaInput, '');
+    await this.page.type(captchaInput, texto, { delay: 100 });
     
-    // Aguarda um pouco para a página processar a resposta
-    await this.page.waitForTimeout(2000);
+    await this.page.click(confirmarBtn);
+    await this.page.waitForTimeout(4000);
   }
 
   /**
-   * Verifica se houve erro ou se os dados foram carregados.
+   * Verifica o resultado final.
    */
   async obterResultado() {
     console.log('[Scraper] Verificando resultado da submissão...');
     
-    // Verifica por mensagens de erro em balões (layout padrão detran)
-    const errorSelector = '.ui-messages-error-detail';
-    const mainErrorSelector = 'li[role="alert"]'; // Outra forma comum de erro no JSF
-    
-    const hasError = await this.page.$(errorSelector) || await this.page.$(mainErrorSelector);
+    const errorSelector = '.ui-messages-error-detail, li[role="alert"]';
+    const hasError = await this.page.$(errorSelector);
 
     if (hasError) {
       const errorText = await hasError.innerText();
-      console.log(`[Scraper] Erro detectado no site: ${errorText}`);
+      console.log(`[Scraper] Erro detectado: ${errorText}`);
       return { success: false, error: errorText };
     }
 
-    // Verifica se caiu na página específica de "Sequência de caracteres incorreta"
     const isErrorPage = await this.page.evaluate(() => {
         return document.body.innerText.includes('Sequência de caracteres incorreta');
     });
 
     if (isErrorPage) {
-        console.log('[Scraper] Página de sequência incorreta detectada.');
         return { success: false, error: 'Sequência de caracteres incorreta!!', needsBack: true };
     }
 
-    // Tentativa de sucesso - Extrair dados da tabela
-    console.log('[Scraper] Dados do veículo carregados. Extraindo informações...');
+    // Botão Prosseguir (Licenciamento)
+    const prosseguirSelector = 'button:has-text("Prosseguir"), input[value="Prosseguir"]';
+    const hasProsseguir = await this.page.$(prosseguirSelector);
+    if (hasProsseguir) {
+        console.log('[Scraper] Prosseguindo...');
+        await hasProsseguir.click();
+        await this.page.waitForTimeout(4000); 
+    }
+
+    // PDF/Visualização
+    const isDocView = await this.page.evaluate(() => {
+        return !!document.querySelector('embed[type="application/pdf"]') || 
+               !!document.querySelector('iframe') ||
+               document.body.innerText.includes('Visualização do Documento');
+    });
+
+    if (isDocView) {
+        console.log('[Scraper] Documento disponível.');
+        const screenshotPath = `documento_${Date.now()}.png`;
+        await this.page.screenshot({ path: screenshotPath, fullPage: true });
+        return { success: true, isDocument: true, screenshot: screenshotPath };
+    }
+
     const dados = await this.extrairDadosVeiculo();
-    
     const resultScreenshot = `resultado_${Date.now()}.png`;
-    await this.page.screenshot({ path: resultScreenshot });
+    await this.page.screenshot({ path: resultScreenshot, fullPage: true });
     
     return { success: true, screenshot: resultScreenshot, dados };
   }
 
   /**
-   * Extrai os dados da tabela de resultados baseada no layout do Detran-PA.
+   * Extração de dados via DOM.
    */
   async extrairDadosVeiculo() {
     return await this.page.evaluate(() => {
         const extrairValor = (label) => {
-            const rows = Array.from(document.querySelectorAll('tr'));
-            const row = rows.find(r => r.innerText.includes(label));
-            if (!row) return 'Não encontrado';
+            const cells = Array.from(document.querySelectorAll('td, span, label'));
+            const found = cells.find(c => c.innerText.includes(label));
+            if (!found) return null;
             
-            // Tenta pegar o texto após o label
-            const text = row.innerText;
-            const parts = text.split(label);
-            return parts[1] ? parts[1].split('\t')[0].trim().replace(/^:/, '').trim() : 'Não encontrado';
+            const next = found.nextElementSibling;
+            return next ? next.innerText.trim() : found.innerText.split(label)[1]?.trim() || null;
         };
 
         return {
@@ -142,33 +190,20 @@ class DetranPaScraper {
             placa: extrairValor('PLACA'),
             renavam: extrairValor('RENAVAM'),
             chassi: extrairValor('CHASSI'),
-            anoFabricacao: extrairValor('ANO DE FABRICAÇÃO'),
-            anoModelo: extrairValor('ANO DO MODELO'),
-            marcaModelo: extrairValor('MARCA/ MODELO'),
-            situacaoLicenciamento: extrairValor('SITUAÇÃO DO LICENCIAMENTO'),
-            statusVeiculo: extrairValor('STATUS DO VEÍCULO')
+            status: extrairValor('STATUS') || extrairValor('SITUAÇÃO')
         };
     });
   }
 
-  /**
-   * Clica no botão 'Voltar' quando ocorre erro de captcha.
-   */
   async clicarVoltar() {
-    console.log('[Scraper] Clicando no botão Voltar...');
-    // Baseado na imagem, o botão "Voltar" costuma ser um link ou botão com o texto
+    console.log('[Scraper] Voltando...');
     const voltarSelector = 'a:has-text("Voltar"), button:has-text("Voltar")';
     await this.page.click(voltarSelector);
-    await this.page.waitForTimeout(2000); // Aguarda volta ao formulário
+    await this.page.waitForTimeout(2000);
   }
 
-  /**
-   * Finaliza a sessão do navegador.
-   */
   async close() {
-    if (this.browser) {
-      await this.browser.close();
-    }
+    if (this.browser) await this.browser.close();
   }
 }
 
