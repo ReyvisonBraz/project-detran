@@ -51,7 +51,7 @@ async function testarScraper() {
       console.log(`[Teste] Captcha com 5 dígitos identificado: ${captchaText}`);
 
       // Submissão
-      await scraper.submeterFormulario(captchaText);
+      await scraper.submeterCaptcha(captchaText);
       const resultado = await scraper.obterResultado();
 
       if (resultado.success) {

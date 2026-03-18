@@ -94,6 +94,14 @@ class TwoCaptchaService {
 
     throw new Error('Tempo limite de espera pelo captcha atingido.');
   }
+
+  /**
+   * Método de conveniência para resolver o captcha em uma única chamada.
+   */
+  async resolverCaptcha(imageBuffer) {
+    const taskId = await this.enviarCaptcha(imageBuffer);
+    return await this.obterResposta(taskId);
+  }
 }
 
 module.exports = TwoCaptchaService;

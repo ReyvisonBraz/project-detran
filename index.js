@@ -1,24 +1,94 @@
 const express = require('express');
-const routes = require('./src/api/routes');
-require('dotenv').config();
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
+const DetranPaScraper = require('./src/scrapers/detranScraper');
+const TwoCaptchaService = require('./src/services/twoCaptchaService');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const port = process.env.PORT || 3000;
 
-// Middleware para processar JSON
+// Middleware
+app.use(cors());
 app.use(express.json());
+app.use(express.static('public'));
 
-// Rotas da API
-app.use('/api', routes);
+// Pasta para servir screenshots
+const uploadsDir = path.join(__dirname, 'public', 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+app.use('/uploads', express.static(uploadsDir));
 
-// Rota de status básico
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Sistema DETRAN-PA Online' });
+/**
+ * Endpoint de Consulta Unificado
+ */
+app.post('/api/consultar', async (req, res) => {
+    const { service, placa, renavam, cpf, chassi } = req.body;
+    console.log(`[API] Nova consulta: ${service} para Placa ${placa}`);
+
+    const scraper = new DetranPaScraper();
+    const solver = new TwoCaptchaService();
+
+    try {
+        await scraper.init(service);
+        
+        if (service === 'SNG' && chassi) {
+            await scraper.preencherSNG(chassi);
+        }
+
+        await scraper.preencherDados(placa, renavam, cpf);
+
+        let resolved = false;
+        let attempts = 0;
+        const maxAttempts = 3;
+        let finalResult = null;
+
+        while (!resolved && attempts < maxAttempts) {
+            attempts++;
+            console.log(`[API] Tentativa ${attempts} de resolver captcha...`);
+            
+            const captchaBuffer = await scraper.capturarCaptcha();
+            const captchaText = await solver.resolverCaptcha(captchaBuffer);
+
+            if (!captchaText) {
+                await scraper.recarregarCaptcha();
+                continue;
+            }
+
+            await scraper.submeterCaptcha(captchaText);
+            finalResult = await scraper.obterResultado();
+
+            if (finalResult.success) {
+                resolved = true;
+            } else if (finalResult.needsBack) {
+                await scraper.clicarVoltar();
+            } else {
+                // Erro fatal ou seletor não encontrado
+                break;
+            }
+        }
+
+        if (resolved) {
+            // Mover screenshot para pasta pública se houver
+            if (finalResult.screenshot) {
+                const oldPath = path.join(__dirname, finalResult.screenshot);
+                const newPath = path.join(uploadsDir, finalResult.screenshot);
+                if (fs.existsSync(oldPath)) {
+                    fs.renameSync(oldPath, newPath);
+                }
+            }
+            res.json(finalResult);
+        } else {
+            res.status(500).json({ success: false, error: finalResult?.error || 'Máximo de tentativas excedido' });
+        }
+
+    } catch (error) {
+        console.error('[API] Erro interno:', error);
+        res.status(500).json({ success: false, error: error.message });
+    } finally {
+        await scraper.close();
+    }
 });
 
-app.listen(PORT, () => {
-  console.log(`========================================`);
-  console.log(`🚀 Servidor DETRAN-PA rodando na porta ${PORT}`);
-  console.log(`🔗 http://localhost:${PORT}/health`);
-  console.log(`========================================`);
+app.listen(port, () => {
+    console.log(`[Server] Portal rodando em http://localhost:${port}`);
 });
