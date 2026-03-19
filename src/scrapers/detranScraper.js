@@ -34,7 +34,7 @@ class DetranPaScraper {
     
     if (this.browser) await this.browser.close();
 
-    this.browser = await chromium.launch({ headless: false });
+    this.browser = await chromium.launch({ headless: true });
     this.page = await this.browser.newPage();
     
     console.log(`[Scraper] Navegando para ${url}...`);
@@ -134,11 +134,14 @@ class DetranPaScraper {
     }
 
     const isErrorPage = await this.page.evaluate(() => {
-        return document.body.innerText.includes('Sequência de caracteres incorreta');
+        const text = document.body.innerText;
+        return text.includes('Sequência de caracteres incorreta') || 
+               text.includes('Contra-senha não confere com a imagem');
     });
 
     if (isErrorPage) {
-        return { success: false, error: 'Sequência de caracteres incorreta!!', needsBack: true };
+        console.log('[Scraper] Captcha incorreto detectado.');
+        return { success: false, error: 'Captcha incorreto', needsBack: false };
     }
 
     // Botão Prosseguir / Continuar / Imprimir (Licenciamento e outros)
@@ -175,9 +178,31 @@ class DetranPaScraper {
 
     if (isDocView) {
         console.log('[Scraper] Documento disponível.');
+        
+        // Tentar capturar o PDF se for um embed ou se houver link de download
+        const pdfUrl = await this.page.evaluate(() => {
+            const embed = document.querySelector('embed[type="application/pdf"]');
+            if (embed) return embed.src;
+            const iframe = document.querySelector('iframe');
+            if (iframe && iframe.src.endsWith('.pdf')) return iframe.src;
+            return null;
+        });
+
+        let pdfPath = null;
+        if (pdfUrl) {
+            console.log(`[Scraper] PDF URL encontrada: ${pdfUrl}`);
+            // Em alguns casos o PDF é gerado dinamicamente, podemos tentar salvar a página como PDF
+            // ou baixar a URL se for direta.
+        }
+
+        // Fallback: Salvar a página como PDF (Playwright suporta isso nativamente)
+        pdfPath = `crlv_${Date.now()}.pdf`;
+        await this.page.pdf({ path: pdfPath, format: 'A4' });
+        console.log(`[Scraper] PDF salvo em: ${pdfPath}`);
+
         const screenshotPath = `documento_${Date.now()}.png`;
         await this.page.screenshot({ path: screenshotPath, fullPage: true });
-        return { success: true, isDocument: true, screenshot: screenshotPath };
+        return { success: true, isDocument: true, screenshot: screenshotPath, pdf: pdfPath };
     }
 
     const dados = await this.extrairDadosVeiculo();

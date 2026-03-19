@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const docPreview = document.getElementById('doc-preview');
     const screenshotView = document.getElementById('screenshot-view');
     const downloadBtn = document.getElementById('download-btn');
+    const downloadPdfBtn = document.getElementById('download-pdf-btn');
 
     // Lógica de campos dinâmicos
     serviceSelect.addEventListener('change', () => {
@@ -81,8 +82,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (res.screenshot) {
             docPreview.classList.remove('hidden');
-            screenshotView.src = `/uploads/${res.screenshot}`;
-            downloadBtn.href = `/uploads/${res.screenshot}`;
+            screenshotView.src = res.screenshot;
+            downloadBtn.href = res.screenshot;
+        }
+
+        if (res.pdf) {
+            downloadPdfBtn.classList.remove('hidden');
+            downloadPdfBtn.href = res.pdf;
+        } else {
+            downloadPdfBtn.classList.add('hidden');
         }
     }
 });

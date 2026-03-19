@@ -60,21 +60,33 @@ app.post('/api/consultar', async (req, res) => {
 
             if (finalResult.success) {
                 resolved = true;
-            } else if (finalResult.needsBack) {
-                await scraper.clicarVoltar();
+            } else if (finalResult.error === 'Captcha incorreto') {
+                console.log('[API] Captcha incorreto, tentando novamente...');
+                // No DETRAN-PA, o captcha geralmente recarrega sozinho ou permanece na mesma página com erro
+                // Se houver botão de voltar necessário, o needsBack trataria, mas aqui parece que só recarregar basta
+                if (finalResult.needsBack) await scraper.clicarVoltar();
             } else {
-                // Erro fatal ou seletor não encontrado
+                // Erro fatal (ex: dados inválidos)
                 break;
             }
         }
 
         if (resolved) {
-            // Mover screenshot para pasta pública se houver
+            // Mover arquivos para pasta pública se houver
             if (finalResult.screenshot) {
                 const oldPath = path.join(__dirname, finalResult.screenshot);
                 const newPath = path.join(uploadsDir, finalResult.screenshot);
                 if (fs.existsSync(oldPath)) {
                     fs.renameSync(oldPath, newPath);
+                    finalResult.screenshot = `/uploads/${finalResult.screenshot}`;
+                }
+            }
+            if (finalResult.pdf) {
+                const oldPath = path.join(__dirname, finalResult.pdf);
+                const newPath = path.join(uploadsDir, finalResult.pdf);
+                if (fs.existsSync(oldPath)) {
+                    fs.renameSync(oldPath, newPath);
+                    finalResult.pdf = `/uploads/${finalResult.pdf}`;
                 }
             }
             res.json(finalResult);
