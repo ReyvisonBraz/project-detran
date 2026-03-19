@@ -13,12 +13,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const downloadBtn = document.getElementById('download-btn');
     const downloadPdfBtn = document.getElementById('download-pdf-btn');
 
-    // Lógica de campos dinâmicos
-    serviceSelect.addEventListener('change', () => {
+    // Inicializar campos dinâmicos com base no serviço selecionado
+    function updateFields() {
         const val = serviceSelect.value;
         cpfField.classList.toggle('hidden', val !== 'CRLV');
         chassiField.classList.toggle('hidden', val !== 'SNG');
-    });
+    }
+
+    // Chamar ao carregar a página
+    updateFields();
+
+    // Lógica de campos dinâmicos
+    serviceSelect.addEventListener('change', updateFields);
 
     // Função de consulta
     btnConsultar.addEventListener('click', async () => {
