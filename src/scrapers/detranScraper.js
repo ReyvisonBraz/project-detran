@@ -50,10 +50,10 @@ class DetranPaScraper {
    */
   async preencherDados(placa, renavam, cpf = null) {
     console.log(`[Scraper] Preenchendo dados básicos...`);
-    
-    // Seletores híbridos (ID parcial e Placeholder)
-    const placaInput = 'input[id$="placa"], input[placeholder*="Placa"]';
-    const renavamInput = 'input[id$="renavam"], input[placeholder*="Renavam"]';
+        // Seletores corretos para o formulário DETRAN-PA
+    const placaInput = 'input#placa';
+    const renavamInput = 'input#renavam';
+    const cpfInput = 'input#cpfCnpj';
     
     await this.page.waitForSelector(placaInput, { state: 'attached', timeout: 30000 });
     
@@ -65,7 +65,6 @@ class DetranPaScraper {
 
     if (cpf) {
       console.log(`[Scraper] Preenchendo CPF...`);
-      const cpfInput = 'input[id$="cpf"], input[id$="dnCpf"], input[placeholder*="CPF"]';
       await this.page.waitForSelector(cpfInput, { timeout: 15000 });
       await this.page.fill(cpfInput, '');
       await this.page.type(cpfInput, cpf, { delay: 100 });
@@ -89,7 +88,20 @@ class DetranPaScraper {
   async capturarCaptcha() {
     console.log('[Scraper] Capturando imagem do captcha em memória...');
     const captchaElement = await this.page.waitForSelector('img[id$="captcha"]', { timeout: 15000 });
-    return await captchaElement.screenshot();
+    
+    // Aguardar um pouco para garantir que a imagem está totalmente carregada
+    await this.page.waitForTimeout(2000);
+    
+    // Tirar screenshot do elemento
+    const screenshot = await captchaElement.screenshot();
+    
+    // Validar que a imagem não está vazia
+    if (!screenshot || screenshot.length === 0) {
+      throw new Error('Captcha screenshot vazio');
+    }
+    
+    console.log(`[Scraper] Captcha capturado com sucesso (${screenshot.length} bytes)`);
+    return screenshot;
   }
 
   /**
@@ -107,15 +119,18 @@ class DetranPaScraper {
    */
   async submeterCaptcha(texto) {
     console.log(`[Scraper] Inserindo captcha: ${texto}...`);
-    const captchaInput = 'input[id$="captcha"], input[id$="senha"], input[id$="txtCaptcha"], input[placeholder*="sequência"]';
-    const confirmarBtn = 'button:has-text("CONFIRMAR"), button:has-text("Confirmar"), input[value="Confirmar"], input[id$="confirma"]';
+    const captchaInput = 'input#senha';
+    const confirmarBtn = 'input#confirma';
     
     await this.page.waitForSelector(captchaInput, { timeout: 15000 });
     await this.page.fill(captchaInput, '');
     await this.page.type(captchaInput, texto, { delay: 100 });
     
+    // Aguardar um pouco antes de clicar para garantir que o valor foi preenchido
+    await this.page.waitForTimeout(1000);
+    
     await this.page.click(confirmarBtn);
-    await this.page.waitForTimeout(4000);
+    await this.page.waitForTimeout(5000);
   }
 
   /**
@@ -144,6 +159,26 @@ class DetranPaScraper {
         return { success: false, error: 'Captcha incorreto', needsBack: false };
     }
 
+    // Aguardar o processamento do DETRAN ("AGUARDE, CONSULTANDO DADOS...")
+    const loadingText = await this.page.evaluate(() => {
+        return document.body.innerText.includes('AGUARDE, CONSULTANDO DADOS');
+    });
+    
+    if (loadingText) {
+        console.log('[Scraper] Detectado processamento em andamento, aguardando conclusão...');
+        // Aguardar até 30 segundos pelo resultado
+        for (let i = 0; i < 30; i++) {
+            await this.page.waitForTimeout(1000);
+            const stillLoading = await this.page.evaluate(() => {
+                return document.body.innerText.includes('AGUARDE, CONSULTANDO DADOS');
+            });
+            if (!stillLoading) {
+                console.log('[Scraper] Processamento concluído!');
+                break;
+            }
+        }
+    }
+    
     // Botão Prosseguir / Continuar / Imprimir (Licenciamento e outros)
     const prosseguirSelectors = [
       'button:has-text("Prosseguir")', 
