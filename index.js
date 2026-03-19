@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+require('dotenv').config();
 const DetranPaScraper = require('./src/scrapers/detranScraper');
 const TwoCaptchaService = require('./src/services/twoCaptchaService');
 
@@ -78,6 +79,7 @@ app.post('/api/consultar', async (req, res) => {
             }
             res.json(finalResult);
         } else {
+            console.error('[API] Erro na consulta:', finalResult?.error);
             res.status(500).json({ success: false, error: finalResult?.error || 'Máximo de tentativas excedido' });
         }
 

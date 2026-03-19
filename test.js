@@ -33,10 +33,9 @@ async function testarScraper() {
       
       let captchaText;
       try {
-        const taskId = await captchaService.enviarCaptcha(captchaBuffer);
-        captchaText = await captchaService.obterResposta(taskId);
+        captchaText = await captchaService.resolverCaptcha(captchaBuffer);
       } catch (err) {
-        console.log(`[Teste] Erro no 2Captcha: ${err.message}. Recarregando...`);
+        console.log(`[Teste] Erro ao resolver captcha: ${err.message}. Recarregando...`);
         await scraper.recarregarCaptcha();
         continue;
       }
@@ -56,7 +55,8 @@ async function testarScraper() {
 
       if (resultado.success) {
         console.log(`[Teste] 🎉 SUCESSO! Resultado salvo em: ${resultado.screenshot}`);
-        console.log('[Teste] Dados Extraídos:', JSON.stringify(resultado.dados, null, 2));
+        if (resultado.isDocument) console.log('[Teste] Documento/Boleto detectado!');
+        if (resultado.dados) console.log('[Teste] Dados Extraídos:', JSON.stringify(resultado.dados, null, 2));
         sucesso = true;
       } else {
         console.log(`[Teste] ❌ FALHA: ${resultado.error}`);
@@ -64,8 +64,9 @@ async function testarScraper() {
         if (resultado.needsBack) {
           await scraper.clicarVoltar();
           // Após voltar, alguns campos podem estar limpos, recarregamos por segurança
+          console.log('[Teste] Re-preenchendo dados após erro de captcha...');
           await scraper.preencherDados(placa, renavam);
-        } else if (resultado.error.toLowerCase().includes('imagem') || resultado.error.toLowerCase().includes('captcha') || resultado.error.toLowerCase().includes('sequência')) {
+        } else if (resultado.error && (resultado.error.toLowerCase().includes('imagem') || resultado.error.toLowerCase().includes('captcha') || resultado.error.toLowerCase().includes('sequência'))) {
           console.log('[Teste] Erro de captcha detectado. Recarregando e tentando novamente...');
           await scraper.recarregarCaptcha();
         } else {

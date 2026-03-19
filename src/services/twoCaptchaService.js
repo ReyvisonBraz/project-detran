@@ -96,9 +96,15 @@ class TwoCaptchaService {
   }
 
   /**
-   * Método de conveniência para resolver o captcha em uma única chamada.
+   * Método de conveniência para resolver o captcha.
+   * Agora suporta modo manual através da variável de ambiente MANUAL_CAPTCHA.
    */
   async resolverCaptcha(imageBuffer) {
+    if (process.env.MANUAL_CAPTCHA === 'true') {
+      const { promptManualCaptcha } = require('../utils/manualCaptcha');
+      return await promptManualCaptcha();
+    }
+
     const taskId = await this.enviarCaptcha(imageBuffer);
     return await this.obterResposta(taskId);
   }

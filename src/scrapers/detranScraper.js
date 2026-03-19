@@ -141,13 +141,29 @@ class DetranPaScraper {
         return { success: false, error: 'Sequência de caracteres incorreta!!', needsBack: true };
     }
 
-    // Botão Prosseguir (Licenciamento)
-    const prosseguirSelector = 'button:has-text("Prosseguir"), input[value="Prosseguir"]';
-    const hasProsseguir = await this.page.$(prosseguirSelector);
-    if (hasProsseguir) {
-        console.log('[Scraper] Prosseguindo...');
-        await hasProsseguir.click();
-        await this.page.waitForTimeout(4000); 
+    // Botão Prosseguir / Continuar / Imprimir (Licenciamento e outros)
+    const prosseguirSelectors = [
+      'button:has-text("Prosseguir")', 
+      'input[value="Prosseguir"]',
+      'button:has-text("Continuar")',
+      'input[value="Continuar"]',
+      'button:has-text("Imprimir")',
+      'input[value="Imprimir"]',
+      'a:has-text("Imprimir Boleto")',
+      'button:has-text("Guia de Recolhimento")'
+    ];
+
+    for (const selector of prosseguirSelectors) {
+        const btn = await this.page.$(selector);
+        if (btn) {
+            const isVisible = await btn.isVisible();
+            if (isVisible) {
+                console.log(`[Scraper] Encontrei ação: ${selector}. Clicando...`);
+                await btn.click();
+                await this.page.waitForTimeout(4000); // Espera carregamento da próxima etapa
+                break;
+            }
+        }
     }
 
     // PDF/Visualização
@@ -196,10 +212,21 @@ class DetranPaScraper {
   }
 
   async clicarVoltar() {
-    console.log('[Scraper] Voltando...');
-    const voltarSelector = 'a:has-text("Voltar"), button:has-text("Voltar")';
-    await this.page.click(voltarSelector);
-    await this.page.waitForTimeout(2000);
+    console.log('[Scraper] Tentando voltar...');
+    const voltarSelector = 'a:has-text("Voltar"), button:has-text("Voltar"), input[value="Voltar"]';
+    
+    try {
+        const btn = await this.page.waitForSelector(voltarSelector, { timeout: 5000 }).catch(() => null);
+        if (btn) {
+            await btn.click();
+        } else {
+            console.log('[Scraper] Botão voltar não encontrado via seletor, usando navegação do browser...');
+            await this.page.goBack();
+        }
+        await this.page.waitForTimeout(2000);
+    } catch (error) {
+        console.warn(`[Scraper] Erro ao tentar voltar: ${error.message}`);
+    }
   }
 
   async close() {

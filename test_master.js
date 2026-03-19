@@ -35,8 +35,7 @@ async function testarServico(servico, dadosVeiculo) {
         
         let captchaText;
         try {
-            const taskId = await captchaService.enviarCaptcha(captchaBuffer);
-            captchaText = await captchaService.obterResposta(taskId);
+            captchaText = await captchaService.resolverCaptcha(captchaBuffer);
         } catch (err) {
             console.log(`[Teste] Erro: ${err.message}. Recarregando...`);
             await scraper.recarregarCaptcha();
@@ -48,17 +47,20 @@ async function testarServico(servico, dadosVeiculo) {
 
         if (resultado.success) {
             console.log(`[Teste - ${servico}] 🎉 SUCESSO! Resultado em: ${resultado.screenshot}`);
+            if (resultado.isDocument) console.log(`[Teste - ${servico}] Documento/Boleto detectado!`);
             if (resultado.dados) console.log('[Teste] Dados:', JSON.stringify(resultado.dados, null, 2));
             sucesso = true;
         } else {
             console.log(`[Teste - ${servico}] ❌ FALHA: ${resultado.error}`);
             if (resultado.needsBack) {
                 await scraper.clicarVoltar();
+                console.log(`[Teste - ${servico}] Re-preenchendo dados...`);
                 // Repreenche conforme o serviço
                 if (servico === 'SNG') await scraper.preencherSNG(dadosVeiculo.chassi);
                 else if (servico === 'CRLV') await scraper.preencherDados(dadosVeiculo.placa, dadosVeiculo.renavam, dadosVeiculo.cpf);
                 else await scraper.preencherDados(dadosVeiculo.placa, dadosVeiculo.renavam);
-            } else {
+            } else if (resultado.error && (resultado.error.toLowerCase().includes('imagem') || resultado.error.toLowerCase().includes('captcha') || resultado.error.toLowerCase().includes('sequência'))) {
+                console.log(`[Teste - ${servico}] Erro de captcha. Recarregando...`);
                 await scraper.recarregarCaptcha();
             }
         }
