@@ -11,6 +11,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const docPreview = document.getElementById('doc-preview');
     const screenshotView = document.getElementById('screenshot-view');
     const downloadBtn = document.getElementById('download-btn');
+    const downloadPdfBtn = document.getElementById('download-pdf-btn');
+    const shareLinkBtn = document.getElementById('share-link-btn');
 
     // Lógica de campos dinâmicos
     serviceSelect.addEventListener('change', () => {
@@ -79,10 +81,25 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        if (res.screenshot) {
+        if (res.screenshotUrl) {
             docPreview.classList.remove('hidden');
-            screenshotView.src = `/uploads/${res.screenshot}`;
-            downloadBtn.href = `/uploads/${res.screenshot}`;
+            screenshotView.src = res.screenshotUrl;
+            downloadBtn.href = res.screenshotUrl;
+        }
+
+        if (res.pdfUrl) {
+            downloadPdfBtn.classList.remove('hidden');
+            downloadPdfBtn.href = res.pdfUrl;
+            downloadPdfBtn.setAttribute('download', `CRLV_${res.dados?.placa || 'documento'}.pdf`);
+        } else {
+            downloadPdfBtn.classList.add('hidden');
+        }
+
+        if (res.shareableUrl) {
+            shareLinkBtn.classList.remove('hidden');
+            shareLinkBtn.href = res.shareableUrl;
+        } else {
+            shareLinkBtn.classList.add('hidden');
         }
     }
 });

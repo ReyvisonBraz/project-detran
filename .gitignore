@@ -3,3 +3,12 @@ node_modules
 .DS_Store
 *.log
 screenshots/
+temp/
+record*.json
+*.pdf
+*.png
+*.jpg
+*.zip
+*.traineddata
+.gemini/
+full_log.txt

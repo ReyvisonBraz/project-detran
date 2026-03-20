@@ -5,6 +5,7 @@ const fs = require('fs');
 require('dotenv').config();
 const DetranPaScraper = require('./src/scrapers/detranScraper');
 const TwoCaptchaService = require('./src/services/twoCaptchaService');
+const FileUtils = require('./src/utils/fileUtils');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -16,7 +17,15 @@ app.use(express.static('public'));
 
 // Pasta para servir screenshots
 const uploadsDir = path.join(__dirname, 'public', 'uploads');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+const tempDir = path.join(__dirname, 'temp');
+
+FileUtils.ensureDir(uploadsDir);
+FileUtils.ensureDir(tempDir);
+
+// Limpeza inicial de arquivos com mais de 1 hora
+FileUtils.cleanupOldFiles(uploadsDir, 60);
+FileUtils.cleanupOldFiles(tempDir, 60);
+
 app.use('/uploads', express.static(uploadsDir));
 
 /**
@@ -30,7 +39,8 @@ app.post('/api/consultar', async (req, res) => {
     const solver = new TwoCaptchaService();
 
     try {
-        await scraper.init(service);
+        const isVisible = process.env.VISIBLE === 'true';
+        await scraper.init(service, { headless: !isVisible });
         
         if (service === 'SNG' && chassi) {
             await scraper.preencherSNG(chassi);
@@ -56,7 +66,20 @@ app.post('/api/consultar', async (req, res) => {
             }
 
             await scraper.submeterCaptcha(captchaText);
-            finalResult = await scraper.obterResultado();
+            // Captura o resultado da consulta
+            const result = await scraper.obterResultado();
+            
+            finalResult = {
+                success: result.success,
+                message: result.message,
+                error: result.error,
+                isDocument: result.isDocument || false,
+                dados: result.dados || null,
+                screenshot: result.screenshot, // Manter o screenshot para processamento posterior
+                pdfPath: result.pdfPath, // Novo campo
+                shareableUrl: result.shareableUrl, // Novo campo
+                needsBack: result.needsBack // Manter para lógica de voltar
+            };
 
             if (finalResult.success) {
                 resolved = true;
@@ -71,12 +94,33 @@ app.post('/api/consultar', async (req, res) => {
         if (resolved) {
             // Mover screenshot para pasta pública se houver
             if (finalResult.screenshot) {
-                const oldPath = path.join(__dirname, finalResult.screenshot);
-                const newPath = path.join(uploadsDir, finalResult.screenshot);
+                const oldPath = finalResult.screenshot;
+                const fileName = path.basename(oldPath);
+                const newPath = path.join(uploadsDir, fileName);
+                
                 if (fs.existsSync(oldPath)) {
                     fs.renameSync(oldPath, newPath);
+                    finalResult.screenshotUrl = `/uploads/${fileName}`;
                 }
             }
+
+            // Mover PDF para pasta pública se houver
+            if (finalResult.pdfPath) {
+                const oldPdfPath = finalResult.pdfPath;
+                const pdfFileName = path.basename(oldPdfPath);
+                const newPdfPath = path.join(uploadsDir, pdfFileName);
+                
+                if (fs.existsSync(oldPdfPath)) {
+                    fs.renameSync(oldPdfPath, newPdfPath);
+                    finalResult.pdfUrl = `/uploads/${pdfFileName}`;
+                    console.log(`[Server] PDF disponibilizado em: ${finalResult.pdfUrl}`);
+                }
+            }
+            
+            // Remove caminhos absolutos antes de enviar ao cliente
+            delete finalResult.screenshot;
+            delete finalResult.pdfPath;
+            
             res.json(finalResult);
         } else {
             console.error('[API] Erro na consulta:', finalResult?.error);
