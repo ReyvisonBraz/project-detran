@@ -59,9 +59,13 @@ class DetranPaScraper {
     this.page.on('download', async download => {
       console.log(`[Scraper] !!! EVENTO DE DOWNLOAD DETECTADO !!! -> ${download.url()}`);
       this.downloadEventReceived = download;
-      const path = await download.path();
-      this.pdfBuffer = fs.readFileSync(path);
-      console.log(`[Scraper] PDF capturado via evento 'download': ${this.pdfBuffer.length} bytes`);
+      try {
+        const downloadPath = await download.path();
+        this.pdfBuffer = fs.readFileSync(downloadPath);
+        console.log(`[Scraper] PDF capturado via evento 'download': ${this.pdfBuffer.length} bytes`);
+      } catch (err) {
+        console.error(`[Scraper] Erro ao processar download: ${err.message}`);
+      }
     });
 
     this.page.on('response', async response => {
@@ -85,7 +89,7 @@ class DetranPaScraper {
             console.log(`[Scraper] Ignorando buffer pequeno demais (${buffer.length} bytes) - provável wrapper.`);
           }
         } catch (e) {
-          console.log(`[Scraper] Erro ao ler corpo do response: ${e.message}`);
+          // Silencioso se o corpo não puder ser lido (ex: download já iniciado)
         }
       }
     });
@@ -106,8 +110,9 @@ class DetranPaScraper {
     this.currentPlaca = placa; // Guarda para nomear arquivos depois
 
     // Seletores híbridos (ID parcial e Placeholder)
-    const placaInput = 'input[id*="placa"], input[placeholder*="Placa"]';
-    const renavamInput = 'input[id*="renavam"], input[placeholder*="Renavam"]';
+    const placaInput = 'input[id*="placa"], input[placeholder*="Placa"], input#placa';
+    const renavamInput = 'input[id*="renavam"], input[placeholder*="Renavam"], input#renavam';
+    const cpfInput = 'input#cpfCnpj, input[id$="cpf"], input[placeholder*="CPF"]';
 
     await this.page.waitForSelector(placaInput, { state: 'attached', timeout: 30000 });
 
@@ -119,7 +124,6 @@ class DetranPaScraper {
 
     if (cpf) {
       console.log(`[Scraper] Preenchendo CPF...`);
-      const cpfInput = 'input[id$="cpf"], input[id$="dnCpf"], input[placeholder*="CPF"]';
       await this.page.waitForSelector(cpfInput, { timeout: 15000 });
       await this.page.fill(cpfInput, '');
       await this.page.type(cpfInput, cpf, { delay: 100 });
@@ -143,12 +147,22 @@ class DetranPaScraper {
   async capturarCaptcha() {
     console.log('[Scraper] Capturando imagem do captcha em memória...');
     const captchaElement = await this.page.waitForSelector('img[id$="captcha"]', { timeout: 15000 });
+    
+    // Aguardar um pouco para garantir que a imagem está totalmente carregada
+    await this.page.waitForTimeout(1000);
+    
     const buffer = await captchaElement.screenshot();
+
+    // Validar que a imagem não está vazia
+    if (!buffer || buffer.length === 0) {
+      throw new Error('Captcha screenshot vazio');
+    }
 
     // Opcional: Salvar cópia local para depuração
     const debugPath = path.join(this.tempDir, `captcha_debug_${Date.now()}.png`);
     await fs.promises.writeFile(debugPath, buffer);
 
+    console.log(`[Scraper] Captcha capturado com sucesso (${buffer.length} bytes)`);
     return buffer;
   }
 
@@ -167,15 +181,18 @@ class DetranPaScraper {
    */
   async submeterCaptcha(texto) {
     console.log(`[Scraper] Inserindo captcha: ${texto}...`);
-    const captchaInput = 'input[id$="captcha"], input[id$="senha"], input[id$="txtCaptcha"], input[placeholder*="sequência"]';
-    const confirmarBtn = 'button:has-text("CONFIRMAR"), button:has-text("Confirmar"), input[value="Confirmar"], input[id$="confirma"]';
+    const captchaInput = 'input[id*="captcha"], input#senha, input[id$="senha"], input[placeholder*="sequência"]';
+    const confirmarBtn = 'input#confirma, button:has-text("CONFIRMAR"), button:has-text("Confirmar"), input[value="Confirmar"]';
 
     await this.page.waitForSelector(captchaInput, { timeout: 15000 });
     await this.page.fill(captchaInput, '');
     await this.page.type(captchaInput, texto, { delay: 100 });
 
+    // Aguardar um pouco antes de clicar para garantir que o valor foi preenchido
+    await this.page.waitForTimeout(1000);
+    
     await this.page.click(confirmarBtn);
-    await this.page.waitForTimeout(4000);
+    await this.page.waitForTimeout(5000);
   }
 
   /**
@@ -198,7 +215,8 @@ class DetranPaScraper {
       'não é o proprietário',
       'não é do proprietário',
       'não pertence ao proprietário',
-      'Documento informado'
+      'Documento informado',
+      'Contra-senha não confere com a imagem'
     ];
 
     const errorDetected = await this.page.evaluate((strings) => {
@@ -211,8 +229,26 @@ class DetranPaScraper {
       return { success: false, error: errorDetected, needsBack: true };
     }
 
-    await this.page.waitForTimeout(2000); // Garante que a transição de tela ocorreu
-
+    // Aguardar o processamento do DETRAN ("AGUARDE, CONSULTANDO DADOS...")
+    const loadingText = await this.page.evaluate(() => {
+        return document.body.innerText.includes('AGUARDE, CONSULTANDO DADOS');
+    });
+    
+    if (loadingText) {
+        console.log('[Scraper] Detectado processamento em andamento, aguardando conclusão...');
+        // Aguardar até 30 segundos pelo resultado
+        for (let i = 0; i < 30; i++) {
+            await this.page.waitForTimeout(1000);
+            const stillLoading = await this.page.evaluate(() => {
+                return document.body.innerText.includes('AGUARDE, CONSULTANDO DADOS');
+            });
+            if (!stillLoading) {
+                console.log('[Scraper] Processamento concluído!');
+                break;
+            }
+        }
+    }
+    
     // Botão Prosseguir / Continuar / Imprimir (Licenciamento e outros)
     const prosseguirSelectors = [
       'button:has-text("Prosseguir")',
@@ -313,7 +349,7 @@ class DetranPaScraper {
         }
       }
       
-      // Estratégia 3: page.pdf() (Péssimo para PDFs embutidos, mas serve de prova)
+      // Estratégia 3: Fallback page.pdf() se nada mais funcionar
       if (!this.pdfBuffer) {
         console.log('[Scraper] Usando fallback page.pdf()...');
         try {

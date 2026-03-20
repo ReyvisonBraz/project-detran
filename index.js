@@ -41,7 +41,7 @@ app.post('/api/consultar', async (req, res) => {
     try {
         const isVisible = process.env.VISIBLE === 'true';
         await scraper.init(service, { headless: !isVisible });
-        
+
         if (service === 'SNG' && chassi) {
             await scraper.preencherSNG(chassi);
         }
@@ -56,7 +56,7 @@ app.post('/api/consultar', async (req, res) => {
         while (!resolved && attempts < maxAttempts) {
             attempts++;
             console.log(`[API] Tentativa ${attempts} de resolver captcha...`);
-            
+
             const captchaBuffer = await scraper.capturarCaptcha();
             const captchaText = await solver.resolverCaptcha(captchaBuffer);
 
@@ -68,7 +68,7 @@ app.post('/api/consultar', async (req, res) => {
             await scraper.submeterCaptcha(captchaText);
             // Captura o resultado da consulta
             const result = await scraper.obterResultado();
-            
+
             finalResult = {
                 success: result.success,
                 message: result.message,
@@ -97,7 +97,7 @@ app.post('/api/consultar', async (req, res) => {
                 const oldPath = finalResult.screenshot;
                 const fileName = path.basename(oldPath);
                 const newPath = path.join(uploadsDir, fileName);
-                
+
                 if (fs.existsSync(oldPath)) {
                     fs.renameSync(oldPath, newPath);
                     finalResult.screenshotUrl = `/uploads/${fileName}`;
@@ -109,18 +109,18 @@ app.post('/api/consultar', async (req, res) => {
                 const oldPdfPath = finalResult.pdfPath;
                 const pdfFileName = path.basename(oldPdfPath);
                 const newPdfPath = path.join(uploadsDir, pdfFileName);
-                
+
                 if (fs.existsSync(oldPdfPath)) {
                     fs.renameSync(oldPdfPath, newPdfPath);
                     finalResult.pdfUrl = `/uploads/${pdfFileName}`;
                     console.log(`[Server] PDF disponibilizado em: ${finalResult.pdfUrl}`);
                 }
             }
-            
+
             // Remove caminhos absolutos antes de enviar ao cliente
             delete finalResult.screenshot;
             delete finalResult.pdfPath;
-            
+
             res.json(finalResult);
         } else {
             console.error('[API] Erro na consulta:', finalResult?.error);
